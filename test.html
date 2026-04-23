@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Gotenberg print-emulation API regression</title>
+  <style>
+    body { font-family: monospace; padding: 20px; }
+    .pass    { color: green; }
+    .fail    { color: red; }
+    .pending { color: orange; }
+    #target  { width: 300px; height: 200px; background: #eee; margin-top: 1em; }
+  </style>
+</head>
+<body>
+  <h2>Gotenberg print-emulation API regression</h2>
+  <ul>
+    <li id="raf"        class="pending">requestAnimationFrame &mdash; PENDING</li>
+    <li id="ro"         class="pending">ResizeObserver &mdash; PENDING</li>
+    <li id="io"         class="pending">IntersectionObserver &mdash; PENDING</li>
+  </ul>
+  <div id="target">target element</div>
+
+  <script>
+    var rafFired = false, roFired = false, ioFired = false;
+
+    // 1. requestAnimationFrame
+    requestAnimationFrame(function () {
+      rafFired = true;
+      var el = document.getElementById('raf');
+      el.textContent = 'requestAnimationFrame \u2014 FIRED \u2713';
+      el.className = 'pass';
+    });
+
+    // 2. ResizeObserver
+    var ro = new ResizeObserver(function (entries) {
+      if (roFired) return;
+      roFired = true;
+      var w = Math.round(entries[0].contentRect.width);
+      var el = document.getElementById('ro');
+      el.textContent = 'ResizeObserver \u2014 FIRED \u2713  (contentRect.width = ' + w + ')';
+      el.className = 'pass';
+    });
+    ro.observe(document.getElementById('target'));
+
+    // 3. IntersectionObserver
+    var io = new IntersectionObserver(function (entries) {
+      if (ioFired) return;
+      ioFired = true;
+      var el = document.getElementById('io');
+      el.textContent = 'IntersectionObserver \u2014 FIRED \u2713  (isIntersecting = ' + entries[0].isIntersecting + ')';
+      el.className = 'pass';
+    });
+    io.observe(document.getElementById('target'));
+
+    // Signal Gotenberg after 3 s - plenty of time for everything to fire if it works.
+    setTimeout(function () {
+      ['raf', 'ro', 'io'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el.className === 'pending') {
+          el.textContent = el.textContent.replace('PENDING', 'NEVER FIRED \u2717');
+          el.className = 'fail';
+        }
+      });
+      document.body.setAttribute('data-pdf-ready', 'true');
+    }, 3000);
+  </script>
+</body>
+</html>

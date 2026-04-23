@@ -1,0 +1,27 @@
+services:
+  # Last known-good release before the regression landed.
+  gotenberg-good:
+    image: gotenberg/gotenberg:8.28.0
+    container_name: gotenberg-good
+    ports:
+      - "3028:3000"
+    command:
+      - "gotenberg"
+      - "--api-timeout=120s"
+      - "--chromium-ignore-certificate-errors"
+      - "--chromium-clear-cache"
+      - "--chromium-clear-cookies"
+
+  # First bad release where rAF / ResizeObserver /
+  # IntersectionObserver silently stop firing.
+  gotenberg-bad:
+    image: gotenberg/gotenberg:8.29.0
+    container_name: gotenberg-bad
+    ports:
+      - "3029:3000"
+    command:
+      - "gotenberg"
+      - "--api-timeout=120s"
+      - "--chromium-ignore-certificate-errors"
+      - "--chromium-clear-cache"
+      - "--chromium-clear-cookies"

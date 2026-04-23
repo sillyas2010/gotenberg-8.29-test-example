@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Gotenberg print-emulation regression - workaround applied</title>
+  <style>
+    body { font-family: monospace; padding: 20px; }
+    .pass    { color: green; }
+    .fail    { color: red; }
+    .pending { color: orange; }
+    #target  { width: 300px; height: 200px; background: #eee; margin-top: 1em; }
+  </style>
+  <!--
+    Workaround patch - runs BEFORE any other script / library initialises.
+    Patches:
+      - requestAnimationFrame / cancelAnimationFrame  (setTimeout-backed, ~60fps)
+      - ResizeObserver                                (setInterval polling, offsetWidth/offsetHeight)
+      - IntersectionObserver                          (fires synchronously once per observed element)
+  -->
+  <script>
+    (function () {
+      var nextHandle = 0;
+      var pending = new Map();
+
+      window.requestAnimationFrame = function (callback) {
+        var handle = ++nextHandle;
+        pending.set(handle, setTimeout(function () {
+          pending.delete(handle);
+          callback(performance.now());
+        }, 16));
+        return handle;
+      };
+      window.cancelAnimationFrame = function (handle) {
+        clearTimeout(pending.get(handle));
+        pending.delete(handle);
+      };
+
+      function PollingResizeObserver(callback) {
+        this._callback = callback;
+        this._observed = [];
+        this._timer = null;
+      }
+      PollingResizeObserver.prototype.observe = function (el) {
+        var entry = {
+          target: el,
+          lastW: -1,
+          lastH: -1,
+        };
+        this._observed.push(entry);
+        if (!this._timer) {
+          var self = this;
+          this._timer = setInterval(function () { self._tick(); }, 100);
+        }
+        this._tick();
+      };
+      PollingResizeObserver.prototype.unobserve = function (el) {
+        this._observed = this._observed.filter(function (e) { return e.target !== el; });
+        if (this._observed.length === 0 && this._timer) {
+          clearInterval(this._timer);
+          this._timer = null;
+        }
+      };
+      PollingResizeObserver.prototype.disconnect = function () {
+        this._observed = [];
+        if (this._timer) {
+          clearInterval(this._timer);
+          this._timer = null;
+        }
+      };
+      PollingResizeObserver.prototype._tick = function () {
+        var changed = [];
+        for (var i = 0; i < this._observed.length; i++) {
+          var e = this._observed[i];
+          var w = e.target.offsetWidth;
+          var h = e.target.offsetHeight;
+          if (w !== e.lastW || h !== e.lastH) {
+            e.lastW = w;
+            e.lastH = h;
+            changed.push({
+              target: e.target,
+              contentRect: {
+                width: w,
+                height: h,
+                top: 0,
+                left: 0,
+                right: w,
+                bottom: h,
+                x: 0,
+                y: 0,
+              },
+              borderBoxSize: [{ inlineSize: w, blockSize: h }],
+              contentBoxSize: [{ inlineSize: w, blockSize: h }],
+              devicePixelContentBoxSize: [{ inlineSize: w, blockSize: h }],
+            });
+          }
+        }
+        if (changed.length > 0) {
+          try { this._callback(changed, this); } catch (err) { console.error(err); }
+        }
+      };
+      window.ResizeObserver = PollingResizeObserver;
+
+      function ImmediateIntersectionObserver(callback) {
+        this._callback = callback;
+        this._observed = [];
+      }
+      ImmediateIntersectionObserver.prototype.observe = function (el) {
+        this._observed.push(el);
+        var self = this;
+        setTimeout(function () {
+          var rect = el.getBoundingClientRect();
+          var entry = {
+            target: el,
+            isIntersecting: true,
+            intersectionRatio: 1,
+            boundingClientRect: rect,
+            intersectionRect: rect,
+            rootBounds: null,
+            time: performance.now(),
+          };
+          try { self._callback([entry], self); } catch (err) { console.error(err); }
+        }, 0);
+      };
+      ImmediateIntersectionObserver.prototype.unobserve = function (el) {
+        this._observed = this._observed.filter(function (x) { return x !== el; });
+      };
+      ImmediateIntersectionObserver.prototype.disconnect = function () {
+        this._observed = [];
+      };
+      ImmediateIntersectionObserver.prototype.takeRecords = function () { return []; };
+      window.IntersectionObserver = ImmediateIntersectionObserver;
+    })();
+  </script>
+</head>
+<body>
+  <h2>Gotenberg print-emulation API regression (workaround applied)</h2>
+  <ul>
+    <li id="raf"        class="pending">requestAnimationFrame &mdash; PENDING</li>
+    <li id="ro"         class="pending">ResizeObserver &mdash; PENDING</li>
+    <li id="io"         class="pending">IntersectionObserver &mdash; PENDING</li>
+  </ul>
+  <div id="target">target element</div>
+
+  <script>
+    var rafFired = false, roFired = false, ioFired = false;
+
+    requestAnimationFrame(function () {
+      rafFired = true;
+      var el = document.getElementById('raf');
+      el.textContent = 'requestAnimationFrame \u2014 FIRED \u2713';
+      el.className = 'pass';
+    });
+
+    var ro = new ResizeObserver(function (entries) {
+      if (roFired) return;
+      roFired = true;
+      var w = Math.round(entries[0].contentRect.width);
+      var el = document.getElementById('ro');
+      el.textContent = 'ResizeObserver \u2014 FIRED \u2713  (contentRect.width = ' + w + ')';
+      el.className = 'pass';
+    });
+    ro.observe(document.getElementById('target'));
+
+    var io = new IntersectionObserver(function (entries) {
+      if (ioFired) return;
+      ioFired = true;
+      var el = document.getElementById('io');
+      el.textContent = 'IntersectionObserver \u2014 FIRED \u2713  (isIntersecting = ' + entries[0].isIntersecting + ')';
+      el.className = 'pass';
+    });
+    io.observe(document.getElementById('target'));
+
+    setTimeout(function () {
+      ['raf', 'ro', 'io'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el.className === 'pending') {
+          el.textContent = el.textContent.replace('PENDING', 'NEVER FIRED \u2717');
+          el.className = 'fail';
+        }
+      });
+      document.body.setAttribute('data-pdf-ready', 'true');
+    }, 3000);
+  </script>
+</body>
+</html>
