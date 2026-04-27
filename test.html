@@ -9,6 +9,7 @@
     .fail    { color: red; }
     .pending { color: orange; }
     #target  { width: 300px; height: 200px; background: #eee; margin-top: 1em; }
+    #map     { width: 400px; height: 300px; background: #eee; margin-top: 1em; }
   </style>
 </head>
 <body>
@@ -17,8 +18,15 @@
     <li id="raf"        class="pending">requestAnimationFrame &mdash; PENDING</li>
     <li id="ro"         class="pending">ResizeObserver &mdash; PENDING</li>
     <li id="io"         class="pending">IntersectionObserver &mdash; PENDING</li>
+    <li id="gmap_tilesloaded"        class="pending">Google Maps tilesloaded &mdash; PENDING</li>
+    <li id="gmap_idle"               class="pending">Google Maps idle &mdash; PENDING</li>
+    <li id="gmap_bounds_changed"     class="pending">Google Maps bounds_changed &mdash; PENDING</li>
+    <li id="gmap_center_changed"     class="pending">Google Maps center_changed &mdash; PENDING</li>
+    <li id="gmap_zoom_changed"       class="pending">Google Maps zoom_changed &mdash; PENDING</li>
+    <li id="gmap_projection_changed" class="pending">Google Maps projection_changed &mdash; PENDING</li>
   </ul>
   <div id="target">target element</div>
+  <div id="map"></div>
 
   <script>
     var rafFired = false, roFired = false, ioFired = false;
@@ -52,9 +60,51 @@
     });
     io.observe(document.getElementById('target'));
 
-    // Signal Gotenberg after 3 s - plenty of time for everything to fire if it works.
+    // 4. Google Maps - exercises the same paint-driven APIs internally
+    //    (rAF, ResizeObserver, IntersectionObserver) and silently breaks on
+    //    8.29.0 along with the three primitives above. We listen for every
+    //    Map event that is meaningful for PDF generation (i.e. fires
+    //    automatically during initial render, not as a result of user input):
+    //    tilesloaded, idle, bounds_changed, center_changed, zoom_changed,
+    //    projection_changed. Pointer / drag / heading / tilt events are
+    //    excluded because they require user input or 3D mode and never fire
+    //    in a headless PDF render anyway.
+    window.initMap = function () {
+      var map = new google.maps.Map(document.getElementById("map"), {
+        center: { lat: 40.7484, lng: -73.9857 },
+        zoom: 12,
+        disableDefaultUI: true,
+        gestureHandling: "none",
+      });
+      var pdfRelevantEvents = [
+        "tilesloaded",
+        "idle",
+        "bounds_changed",
+        "center_changed",
+        "zoom_changed",
+        "projection_changed",
+      ];
+      pdfRelevantEvents.forEach(function (evt) {
+        google.maps.event.addListenerOnce(map, evt, function () {
+          var el = document.getElementById("gmap_" + evt);
+          el.textContent = "Google Maps " + evt + " \u2014 FIRED \u2713";
+          el.className = "pass";
+        });
+      });
+      // center_changed and zoom_changed do NOT fire when those properties
+      // are set via the constructor - they only fire when something mutates
+      // them after init (typical real-world usage: fitBounds, setCenter,
+      // setZoom). Drive them explicitly so the rows are meaningful.
+      setTimeout(function () {
+        map.setCenter({ lat: 40.7128, lng: -74.0060 });
+        map.setZoom(13);
+      }, 2000);
+    };
+
+    // Signal Gotenberg after 8 s - plenty of time for everything (incl. Maps
+    // tiles) to fire if it works.
     setTimeout(function () {
-      ['raf', 'ro', 'io'].forEach(function (id) {
+      ['raf', 'ro', 'io', "gmap_tilesloaded", "gmap_idle", "gmap_bounds_changed", "gmap_center_changed", "gmap_zoom_changed", "gmap_projection_changed"].forEach(function (id) {
         var el = document.getElementById(id);
         if (el.className === 'pending') {
           el.textContent = el.textContent.replace('PENDING', 'NEVER FIRED \u2717');
@@ -62,7 +112,9 @@
         }
       });
       document.body.setAttribute('data-pdf-ready', 'true');
-    }, 3000);
+    }, 8000);
   </script>
+  <script async
+          src="https://maps.googleapis.com/maps/api/js?key=__GOOGLE_MAPS_API_KEY__&loading=async&callback=initMap"></script>
 </body>
 </html>
