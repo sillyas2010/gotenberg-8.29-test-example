@@ -10,6 +10,7 @@
     .pending { color: orange; }
     #target  { width: 300px; height: 200px; background: #eee; margin-top: 1em; }
     #map     { width: 400px; height: 300px; background: #eee; margin-top: 1em; }
+    @keyframes gtest { from { opacity: 0; } to { opacity: 1; } }
   </style>
 </head>
 <body>
@@ -18,6 +19,13 @@
     <li id="raf"        class="pending">requestAnimationFrame &mdash; PENDING</li>
     <li id="ro"         class="pending">ResizeObserver &mdash; PENDING</li>
     <li id="io"         class="pending">IntersectionObserver &mdash; PENDING</li>
+    <li id="mo"         class="pending">MutationObserver &mdash; PENDING</li>
+    <li id="te"         class="pending">CSS transitionend &mdash; PENDING</li>
+    <li id="ae"         class="pending">CSS animationend &mdash; PENDING</li>
+    <li id="dec"        class="pending">HTMLImageElement.decode() &mdash; PENDING</li>
+    <li id="cib"        class="pending">createImageBitmap() &mdash; PENDING</li>
+    <li id="ric"        class="pending">requestIdleCallback &mdash; PENDING</li>
+    <li id="wgl"        class="pending">WebGL clear+readPixels &mdash; PENDING</li>
     <li id="gmap_tilesloaded"        class="pending">Google Maps tilesloaded &mdash; PENDING</li>
     <li id="gmap_idle"               class="pending">Google Maps idle &mdash; PENDING</li>
     <li id="gmap_bounds_changed"     class="pending">Google Maps bounds_changed &mdash; PENDING</li>
@@ -60,7 +68,120 @@
     });
     io.observe(document.getElementById('target'));
 
-    // 4. Google Maps - exercises the same paint-driven APIs internally
+    // 4. Paint-pipeline-adjacent diagnostics. The hypothesis is that 8.29.0
+    //    suspends Chromium's BeginFrame / compositor loop under
+    //    emulatedMediaType=print: anything keyed off that loop (rAF,
+    //    ResizeObserver, IntersectionObserver, CSS animations / transitions,
+    //    image decode pipeline, WebGL drawing-buffer presentation,
+    //    requestIdleCallback) silently stops, while microtask / task / DOM
+    //    mutation paths keep working. Each row below isolates one of those
+    //    paths so the resulting PDF tells us exactly which APIs are dead.
+
+    // 4a. MutationObserver - microtask-queue-driven, expected to FIRE on every
+    //     build. Acts as a control: if this also breaks, the failure is much
+    //     broader than the paint pipeline.
+    try {
+      var moTarget = document.createElement("span");
+      document.body.appendChild(moTarget);
+      var mo = new MutationObserver(function () {
+        var el = document.getElementById("mo");
+        el.textContent = "MutationObserver \u2014 FIRED \u2713";
+        el.className = "pass";
+      });
+      mo.observe(moTarget, { childList: true });
+      moTarget.appendChild(document.createTextNode("x"));
+    } catch (e) {}
+
+    // 4b. CSS transitionend - dispatched from the animation frame loop, same
+    //     plumbing as rAF. Maps fades tiles in via opacity transitions.
+    try {
+      var teTarget = document.createElement("div");
+      teTarget.style.cssText = "position:absolute;left:-9999px;width:2px;height:2px;opacity:0;transition:opacity 200ms linear;";
+      document.body.appendChild(teTarget);
+      teTarget.addEventListener("transitionend", function () {
+        var el = document.getElementById("te");
+        el.textContent = "CSS transitionend \u2014 FIRED \u2713";
+        el.className = "pass";
+      });
+      setTimeout(function () { teTarget.style.opacity = "1"; }, 50);
+    } catch (e) {}
+
+    // 4c. CSS animationend - same animation-frame plumbing as transitionend.
+    try {
+      var aeTarget = document.createElement("div");
+      aeTarget.style.cssText = "position:absolute;left:-9999px;width:2px;height:2px;animation:gtest 200ms linear forwards;";
+      aeTarget.addEventListener("animationend", function () {
+        var el = document.getElementById("ae");
+        el.textContent = "CSS animationend \u2014 FIRED \u2713";
+        el.className = "pass";
+      });
+      document.body.appendChild(aeTarget);
+    } catch (e) {}
+
+    // 4d. HTMLImageElement.decode() - returns a Promise that resolves only
+    //     when the image has been decoded by the paint pipeline. Modern Maps
+    //     uses decode() to confirm a raster tile is ready before reporting it.
+    //     1x1 transparent PNG so we do not depend on network.
+    try {
+      var decImg = new Image();
+      decImg.decode().then(function () {
+        var el = document.getElementById("dec");
+        el.textContent = "HTMLImageElement.decode() \u2014 FIRED \u2713";
+        el.className = "pass";
+      }).catch(function () {});
+      decImg.src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII=";
+    } catch (e) {}
+
+    // 4e. createImageBitmap() - off-thread image decode. Same role for the
+    //     vector-tile / WebGL path. Promise gated on the decoder.
+    try {
+      var cibB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII=";
+      var cibBin = atob(cibB64);
+      var cibBytes = new Uint8Array(cibBin.length);
+      for (var i = 0; i < cibBin.length; i++) cibBytes[i] = cibBin.charCodeAt(i);
+      var cibBlob = new Blob([cibBytes], { type: "image/png" });
+      createImageBitmap(cibBlob).then(function () {
+        var el = document.getElementById("cib");
+        el.textContent = "createImageBitmap() \u2014 FIRED \u2713";
+        el.className = "pass";
+      }).catch(function () {});
+    } catch (e) {}
+
+    // 4f. requestIdleCallback - scheduled relative to the rendering pipeline,
+    //     so it tends to pause whenever rAF pauses.
+    try {
+      if (typeof requestIdleCallback === "function") {
+        requestIdleCallback(function () {
+          var el = document.getElementById("ric");
+          el.textContent = "requestIdleCallback \u2014 FIRED \u2713";
+          el.className = "pass";
+        });
+      }
+    } catch (e) {}
+
+    // 4g. WebGL drawing-buffer presentation. clear() + finish() + readPixels
+    //     forces the GPU to materialise the framebuffer. If readPixels does
+    //     not return our clear color, the GL pipeline is dead - and Maps
+    //     cannot render vector tiles either.
+    try {
+      var glCanvas = document.createElement("canvas");
+      glCanvas.width = 4; glCanvas.height = 4;
+      var gl = glCanvas.getContext("webgl") || glCanvas.getContext("experimental-webgl");
+      if (gl) {
+        gl.clearColor(1, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.finish();
+        var px = new Uint8Array(4);
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        if (px[0] === 255 && px[1] === 0 && px[2] === 0) {
+          var el = document.getElementById("wgl");
+          el.textContent = "WebGL clear+readPixels \u2014 FIRED \u2713  (RGBA[0]=" + px[0] + ")";
+          el.className = "pass";
+        }
+      }
+    } catch (e) {}
+
+    // 5. Google Maps - exercises the same paint-driven APIs internally
     //    (rAF, ResizeObserver, IntersectionObserver) and silently breaks on
     //    8.29.0 along with the three primitives above. We listen for every
     //    Map event that is meaningful for PDF generation (i.e. fires
@@ -104,7 +225,7 @@
     // Signal Gotenberg after 8 s - plenty of time for everything (incl. Maps
     // tiles) to fire if it works.
     setTimeout(function () {
-      ['raf', 'ro', 'io', "gmap_tilesloaded", "gmap_idle", "gmap_bounds_changed", "gmap_center_changed", "gmap_zoom_changed", "gmap_projection_changed"].forEach(function (id) {
+      ['raf', 'ro', 'io', "mo", "te", "ae", "dec", "cib", "ric", "wgl", "gmap_tilesloaded", "gmap_idle", "gmap_bounds_changed", "gmap_center_changed", "gmap_zoom_changed", "gmap_projection_changed"].forEach(function (id) {
         var el = document.getElementById(id);
         if (el.className === 'pending') {
           el.textContent = el.textContent.replace('PENDING', 'NEVER FIRED \u2717');
