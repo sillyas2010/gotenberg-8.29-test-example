@@ -10,7 +10,7 @@ API** &mdash; silently stop working with
 
 | File | Purpose |
 |---|---|
-| `test.html` | The reproduction from the issue report. Tests `requestAnimationFrame`, `ResizeObserver`, `IntersectionObserver`, plus a battery of paint-pipeline-adjacent diagnostics &mdash; `MutationObserver` (control), CSS `transitionend`, CSS `animationend`, `HTMLImageElement.decode()`, `createImageBitmap()`, `requestIdleCallback`, and a WebGL `clear` + `readPixels` round-trip &mdash; and every Google Maps Map-instance event that matters for PDF generation: `tilesloaded`, `idle`, `bounds_changed`, `projection_changed` (fire automatically during initial render) plus `center_changed` and `zoom_changed` (driven explicitly via `setCenter` / `setZoom` after init, since otherwise they never fire on a freshly constructed map). Pointer / drag / mouse / heading / tilt / context-menu events are excluded because they require user input or 3D mode and never fire in a headless PDF render. Sets `data-pdf-ready` on `<body>` after 8s so Gotenberg knows when to snapshot. |
+| `test.html` | The reproduction from the issue report. Tests `requestAnimationFrame`, `ResizeObserver`, `IntersectionObserver`, plus a battery of paint-pipeline-adjacent diagnostics &mdash; `MutationObserver` (control), CSS `transitionend`, CSS `animationend`, `createImageBitmap()`, `requestIdleCallback`, and a WebGL `clear` + `readPixels` round-trip &mdash; and every Google Maps Map-instance event that matters for PDF generation: `tilesloaded`, `idle`, `bounds_changed`, `projection_changed` (fire automatically during initial render) plus `center_changed` and `zoom_changed` (driven explicitly via `setCenter` / `setZoom` after init, since otherwise they never fire on a freshly constructed map). Pointer / drag / mouse / heading / tilt / context-menu events are excluded because they require user input or 3D mode and never fire in a headless PDF render. Sets `data-pdf-ready` on `<body>` after 8s so Gotenberg knows when to snapshot. |
 | `test-with-workaround.html` | Same page (incl. the diagnostic battery), but patches `requestAnimationFrame`, `ResizeObserver` and `IntersectionObserver` before any other script runs. Restores the three primitives and most Google Maps events on 8.29.0 &mdash; with one residual hole: `tilesloaded` still never fires, meaning Maps never reports that its tiles have actually painted. The diagnostic rows make it possible to read off, from one PDF, exactly which paint-adjacent surfaces the polyfill does and does not rescue. |
 | `docker-compose.yml` | Runs two Gotenberg instances side by side &mdash; `8.28.0` (last good) on port `3028`, `8.29.0` (first affected) on port `3029`. |
 | `reproduce.sh` | Loads `GOOGLE_MAPS_API_KEY` from `.env`, renders the templated HTML, drives both Gotenberg endpoints with both HTML files, writes four PDFs into `./out`, and (if `pdftotext` is installed) prints the test-result lines extracted from each PDF. |
@@ -47,7 +47,6 @@ paint-pipeline-adjacent diagnostic battery):
 | `MutationObserver` (control) | FIRED | FIRED | FIRED | FIRED |
 | CSS `transitionend` | FIRED | **NEVER FIRED** | FIRED | **NEVER FIRED** |
 | CSS `animationend` | FIRED | **NEVER FIRED** | FIRED | **NEVER FIRED** |
-| `HTMLImageElement.decode()` | NEVER FIRED | NEVER FIRED | NEVER FIRED | NEVER FIRED |
 | `createImageBitmap()` | FIRED | FIRED | FIRED | FIRED |
 | `requestIdleCallback` | FIRED | FIRED | FIRED | FIRED |
 | WebGL `clear` + `readPixels` | FIRED (RGBA[0]=255) | FIRED (RGBA[0]=255) | FIRED | FIRED |
@@ -93,7 +92,6 @@ or (c) some narrower mix. The measured outcomes pick (b), with one nuance.
 | `MutationObserver` | microtask queue | FIRED | Microtask path is unaffected. Confirms the regression is not a generic "JS callbacks stop firing" bug. |
 | CSS `transitionend` | animation-frame loop | NEVER FIRED | Same loop as rAF. Broken in lockstep, even with the rAF polyfill applied. |
 | CSS `animationend` | animation-frame loop | NEVER FIRED | Same. The setTimeout-backed rAF polyfill does not drive CSS animation progress &mdash; that lives below the JS boundary, in Chromium itself. |
-| `HTMLImageElement.decode()` | image decode pipeline | NEVER FIRED on **both** 8.28 and 8.29 | Pre-existing quirk of headless print emulation, **not** the 8.29.0 regression. The Promise never settles regardless of version, so this row is informational only. |
 | `createImageBitmap()` | off-thread image decode | FIRED | Off-thread image decode IS alive on 8.29.0. Rules out "all image decode pipelines are dead". |
 | `requestIdleCallback` | task queue, scheduled around frames | FIRED | rIC schedules off the task queue, not the BeginFrame loop, in this Chromium build. Independent of the rAF break. |
 | WebGL `clear` + `readPixels` | GPU command buffer | FIRED, RGBA[0]=255 | The GL command stream and synchronous readback work fine. The compositor is not globally frozen &mdash; only the JS-visible frame-driven callback loop is. |

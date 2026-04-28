@@ -143,7 +143,6 @@
     <li id="mo"         class="pending">MutationObserver &mdash; PENDING</li>
     <li id="te"         class="pending">CSS transitionend &mdash; PENDING</li>
     <li id="ae"         class="pending">CSS animationend &mdash; PENDING</li>
-    <li id="dec"        class="pending">HTMLImageElement.decode() &mdash; PENDING</li>
     <li id="cib"        class="pending">createImageBitmap() &mdash; PENDING</li>
     <li id="ric"        class="pending">requestIdleCallback &mdash; PENDING</li>
     <li id="wgl"        class="pending">WebGL clear+readPixels &mdash; PENDING</li>
@@ -228,16 +227,6 @@
     } catch (e) {}
 
     try {
-      var decImg = new Image();
-      decImg.decode().then(function () {
-        var el = document.getElementById("dec");
-        el.textContent = "HTMLImageElement.decode() \u2014 FIRED \u2713";
-        el.className = "pass";
-      }).catch(function () {});
-      decImg.src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII=";
-    } catch (e) {}
-
-    try {
       var cibB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII=";
       var cibBin = atob(cibB64);
       var cibBytes = new Uint8Array(cibBin.length);
@@ -307,7 +296,7 @@
     };
 
     setTimeout(function () {
-      ['raf', 'ro', 'io', "mo", "te", "ae", "dec", "cib", "ric", "wgl", "gmap_tilesloaded", "gmap_idle", "gmap_bounds_changed", "gmap_center_changed", "gmap_zoom_changed", "gmap_projection_changed"].forEach(function (id) {
+      ['raf', 'ro', 'io', "mo", "te", "ae", "cib", "ric", "wgl", "gmap_tilesloaded", "gmap_idle", "gmap_bounds_changed", "gmap_center_changed", "gmap_zoom_changed", "gmap_projection_changed"].forEach(function (id) {
         var el = document.getElementById(id);
         if (el.className === 'pending') {
           el.textContent = el.textContent.replace('PENDING', 'NEVER FIRED \u2717');
